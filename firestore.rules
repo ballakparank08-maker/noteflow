@@ -2,14 +2,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Default deny all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Helper functions
     function isSignedIn() {
       return request.auth != null;
+    }
+
+    // Admin rule
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'ballakparank08@gmail.com';
     }
 
     function isOwner(userId) {
@@ -31,17 +30,57 @@ service cloud.firestore {
              data.paragraphs.size() <= 1000;
     }
 
-    // Health check endpoint
+    // Connection test document
     match /test/{docId} {
-      allow read: if true;
+      allow read, write: if true;
     }
 
-    // User-scoped notes collection
+    // Users collection
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // NoteFlow: User-scoped notes collection
     match /users/{userId}/notes/{noteId} {
       allow get, list: if isOwner(userId);
       allow create: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming());
       allow update: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming());
       allow delete: if isOwner(userId) && isValidId(noteId);
+    }
+
+    // Products catalog
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      allow read: if isAdmin() || (isSignedIn() && (
+        resource.data.customerUid == request.auth.uid ||
+        resource.data.customerEmail == request.auth.token.email
+      ));
+      allow create: if true;
+      allow update, delete: if isAdmin();
+    }
+
+    // Inquiries
+    match /inquiries/{inquiryId} {
+      allow create: if true;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Newsletter
+    match /newsletter/{subId} {
+      allow create: if true;
+      allow read: if isAdmin();
+    }
+
+    // System config
+    match /config/{configDoc} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }
