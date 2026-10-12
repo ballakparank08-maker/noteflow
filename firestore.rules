@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidNote(data) {
+      return data.title is string &&
+             data.title.size() <= 500 &&
+             data.paragraphs is list &&
+             data.paragraphs.size() <= 1000;
+    }
+
+    // Health check endpoint
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // User-scoped notes collection
+    match /users/{userId}/notes/{noteId} {
+      allow get, list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming());
+      allow update: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming());
+      allow delete: if isOwner(userId) && isValidId(noteId);
+    }
+  }
+}

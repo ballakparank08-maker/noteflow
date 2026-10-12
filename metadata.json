@@ -1,0 +1,8 @@
+{
+  "name": "NoteFlow",
+  "description": "Minimalist notes app with paragraph-by-paragraph checklist toggles and draggable multi-note floating pad.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

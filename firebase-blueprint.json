@@ -1,0 +1,53 @@
+{
+  "entities": {
+    "paragraph": {
+      "title": "ParagraphBlock",
+      "description": "A single paragraph block with optional checklist status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "text": { "type": "string", "maxLength": 10000 },
+        "isChecklist": { "type": "boolean" },
+        "checked": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["p", "h1", "h2", "callout", "quote", "table"] },
+        "tableData": { "type": "object" }
+      },
+      "required": ["id", "text", "isChecklist", "checked", "type"]
+    },
+    "floatingSubNote": {
+      "title": "FloatingSubNote",
+      "description": "Small side-note attached to a main document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "number" },
+        "paragraphs": { "type": "array" }
+      },
+      "required": ["id", "title", "updatedAt"]
+    },
+    "note": {
+      "title": "Note",
+      "description": "A document note with paragraph blocks and floating side-notes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 500 },
+        "isPinned": { "type": "boolean" },
+        "category": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "paragraphs": { "type": "array" },
+        "floatingNotes": { "type": "array" }
+      },
+      "required": ["id", "title", "createdAt", "updatedAt", "paragraphs"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/note" },
+      "description": "Stores user notes with paragraph checklists and side-notes"
+    }
+  }
+}
