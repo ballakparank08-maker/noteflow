@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Note, FloatingSubNote, FloatingPadConfig, ParagraphBlock, WordSize, AutoSaveStatus } from './types';
+import { Note, FloatingSubNote, FloatingPadConfig, ParagraphBlock, WordSize, AutoSaveStatus, TableData, TableColumn, TableRow, TableCell } from './types';
 import { INITIAL_MAIN_NOTES } from './data/defaultNotes';
 import { generateId } from './utils/helpers';
 import { TopNavbar } from './components/TopNavbar';
@@ -36,6 +36,31 @@ const STORAGE_KEY_CONFIG = 'iclick4free_floating_config_v2';
 const STORAGE_KEY_WORDSIZE = 'iclick4free_word_size_v2';
 const STORAGE_KEY_AUTOSAVE = 'iclick4free_autosave_v2';
 
+function sanitizeTableData(td?: TableData): TableData | undefined {
+  if (!td || !Array.isArray(td.columns)) return undefined;
+  return {
+    columns: td.columns.map((c: TableColumn, cIdx: number) => ({
+      id: c?.id || `col-${cIdx}`,
+      title: c?.title ?? '',
+      isChecklist: Boolean(c?.isChecklist),
+    })),
+    rows: Array.isArray(td.rows)
+      ? td.rows.map((r: TableRow, rIdx: number) => ({
+          id: r?.id || `row-${rIdx}`,
+          cells: Array.isArray(r?.cells)
+            ? r.cells.map((cell: TableCell, cellIdx: number) => ({
+                id: cell?.id || `cell-${cellIdx}`,
+                text: cell?.text ?? '',
+                isChecklist: Boolean(cell?.isChecklist),
+                checked: Boolean(cell?.checked),
+                file: cell?.file || undefined,
+              }))
+            : [],
+        }))
+      : [],
+  };
+}
+
 function ensureNoteFloatingNotes(note: Note): Note {
   const safeParagraphs = Array.isArray(note.paragraphs)
     ? note.paragraphs.map((p, idx) => ({
@@ -44,6 +69,7 @@ function ensureNoteFloatingNotes(note: Note): Note {
         isChecklist: Boolean(p?.isChecklist),
         checked: Boolean(p?.checked),
         type: p?.type || 'p',
+        tableData: sanitizeTableData(p?.tableData),
       }))
     : [];
 
@@ -59,6 +85,7 @@ function ensureNoteFloatingNotes(note: Note): Note {
               isChecklist: Boolean(fp?.isChecklist),
               checked: Boolean(fp?.checked),
               type: fp?.type || 'p',
+              tableData: sanitizeTableData(fp?.tableData),
             }))
           : [
               {

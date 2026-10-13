@@ -6,11 +6,19 @@ export type AutoSaveStatus = 'saved' | 'saving' | 'error';
 
 export type { FontFamilyId, FontOption } from './utils/fontConstants';
 
+export interface CellAttachment {
+  name: string;
+  size: number;
+  type: string;
+  dataUrl?: string;
+}
+
 export interface TableCell {
   id: string;
   text: string;
   isChecklist: boolean;
   checked: boolean;
+  file?: CellAttachment;
 }
 
 export interface TableColumn {

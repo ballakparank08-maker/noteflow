@@ -27,12 +27,23 @@ function sanitizeParagraphForFirestore(p: ParagraphBlock): Record<string, unknow
       })),
       rows: (p.tableData.rows || []).map((row) => ({
         id: row.id,
-        cells: (row.cells || []).map((cell) => ({
-          id: cell.id,
-          text: cell.text || '',
-          isChecklist: Boolean(cell.isChecklist),
-          checked: Boolean(cell.checked),
-        })),
+        cells: (row.cells || []).map((cell) => {
+          const cResult: Record<string, unknown> = {
+            id: cell.id,
+            text: cell.text || '',
+            isChecklist: Boolean(cell.isChecklist),
+            checked: Boolean(cell.checked),
+          };
+          if (cell.file) {
+            cResult.file = {
+              name: cell.file.name || 'file',
+              size: Number(cell.file.size) || 0,
+              type: cell.file.type || '',
+              ...(cell.file.dataUrl ? { dataUrl: cell.file.dataUrl } : {}),
+            };
+          }
+          return cResult;
+        }),
       })),
     };
   }
