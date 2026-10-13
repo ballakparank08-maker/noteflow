@@ -193,19 +193,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <Copy className="w-3 h-3" />
                       </button>
 
-                      {notes.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteNote(note.id);
-                          }}
-                          className="p-1 rounded text-zinc-500 hover:text-red-400"
-                          title="Delete document"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteNote(note.id);
+                        }}
+                        className="p-1 rounded text-zinc-500 hover:text-red-400"
+                        title="Delete document"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
 

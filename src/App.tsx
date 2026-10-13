@@ -5,7 +5,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Note, FloatingSubNote, FloatingPadConfig, ParagraphBlock, WordSize, TableData, TableColumn, TableRow, TableCell } from './types';
-import { INITIAL_MAIN_NOTES } from './data/defaultNotes';
 import { generateId } from './utils/helpers';
 import { TopNavbar } from './components/TopNavbar';
 import { Sidebar } from './components/Sidebar';
@@ -15,7 +14,7 @@ import { ExportModal } from './components/ExportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { AuthModal } from './components/AuthModal';
 import { loadFileToNote } from './utils/fileLoader';
-import { FolderOpen, Cloud } from 'lucide-react';
+import { FolderOpen, Cloud, Loader2 } from 'lucide-react';
 import {
   auth,
   signInWithPopup,
@@ -34,11 +33,11 @@ import {
   saveAllNotesToFirestore,
   saveNoteToFirestore,
   deleteNoteFromFirestore,
-  syncLocalNotesToFirestore,
+  loadUserNotesFromFirestore,
+  createBlankNote,
 } from './services/notesDb';
 import { PasscodeLoginPage } from './components/PasscodeLoginPage';
 
-const STORAGE_KEY_NOTES = 'iclick4free_main_notes_v2';
 const STORAGE_KEY_CONFIG = 'iclick4free_floating_config_v2';
 const STORAGE_KEY_WORDSIZE = 'iclick4free_word_size_v2';
 
@@ -170,7 +169,7 @@ function getInitialFloatingConfig(): FloatingPadConfig {
 }
 
 export default function App() {
-  // Passcode gate (no email, no password, only passcode: Teachmehowtodo-GGY)
+  // Passcode gate
   const [isPasscodeUnlocked, setIsPasscodeUnlocked] = useState<boolean>(() => {
     try {
       return localStorage.getItem('iclick4free_passcode_unlocked') === 'true';
@@ -179,25 +178,11 @@ export default function App() {
     }
   });
 
-  // Load initial notes from localStorage or defaults
-  const [notes, setNotes] = useState<Note[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_NOTES);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Note[];
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(ensureNoteFloatingNotes);
-        }
-      }
-    } catch {
-      // Fallback
-    }
-    return INITIAL_MAIN_NOTES.map(ensureNoteFloatingNotes);
-  });
-
-  const [activeNoteId, setActiveNoteId] = useState<string>(() => {
-    return notes[0]?.id || '';
-  });
+  // Pure Firebase state - No local database
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [isLoadingNotes, setIsLoadingNotes] = useState<boolean>(true);
+  const [isAuthInitializing, setIsAuthInitializing] = useState<boolean>(true);
+  const [activeNoteId, setActiveNoteId] = useState<string>('');
 
   // Database & User authentication state
   const [user, setUser] = useState<User | null>(null);
@@ -239,14 +224,13 @@ export default function App() {
     notesRef.current = notes;
   }, [notes]);
 
-  // Sync notes to localStorage
+  // Wipe any legacy localStorage notes to prevent resurrected examples
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notes));
-    } catch {
-      // Quota handling
-    }
-  }, [notes]);
+      localStorage.removeItem('iclick4free_main_notes_v2');
+      localStorage.removeItem('iclick4free_main_notes');
+    } catch {}
+  }, []);
 
   // Sync floating pad config to localStorage
   useEffect(() => {
@@ -269,6 +253,17 @@ export default function App() {
   // Ref to debounce Firestore writes
   const saveDebounceMap = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  const handleSignInPasscode = useCallback(async () => {
+    isExplicitlySignedOut.current = false;
+    const email = 'passcode.workspace@noteflow.internal';
+    const password = 'Teachmehowtodo-GGY-Passcode2026!';
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch {
+      await createUserWithEmailAndPassword(auth, email, password);
+    }
+  }, []);
+
   // Firebase Auth & Firestore live synchronization
   useEffect(() => {
     let unsubscribeFirestore: (() => void) | null = null;
@@ -288,67 +283,66 @@ export default function App() {
         } catch {}
 
         setIsSyncing(true);
+        setIsLoadingNotes(true);
         try {
-          // Sync existing local notes to user's Firestore document & resolve merged notes
-          const mergedNotes = await syncLocalNotesToFirestore(currentUser.uid, notesRef.current);
-          if (mergedNotes && mergedNotes.length > 0) {
-            const normalized = mergedNotes.map(ensureNoteFloatingNotes);
-            setNotes(normalized);
-            setActiveNoteId((prevId) => {
-              if (prevId && normalized.some((n) => n.id === prevId)) {
-                return prevId;
-              }
-              return normalized[0]?.id || '';
-            });
-          }
+          // Direct load from Firebase Cloud Firestore - No local database
+          const cloudNotes = await loadUserNotesFromFirestore(currentUser.uid);
+          const normalized = cloudNotes.map(ensureNoteFloatingNotes);
+          setNotes(normalized);
+          setActiveNoteId((prevId) => {
+            if (prevId && normalized.some((n) => n.id === prevId)) {
+              return prevId;
+            }
+            return normalized[0]?.id || '';
+          });
+          setIsLoadingNotes(false);
+          setIsSyncing(false);
+          setIsAuthInitializing(false);
 
-          // Subscribe to live updates from user's Firestore document
+          // Real-time Firestore subscription
           unsubscribeFirestore = subscribeUserNotes(
             currentUser.uid,
             (remoteNotes) => {
               if (remoteNotes.length > 0) {
-                const normalized = remoteNotes.map(ensureNoteFloatingNotes);
-                setNotes((prevNotes) => {
-                  const merged = [...prevNotes];
-                  for (const remote of normalized) {
-                    const localIdx = merged.findIndex((n) => n.id === remote.id);
-                    if (localIdx === -1) {
-                      merged.push(remote);
-                    } else {
-                      const local = merged[localIdx];
-                      const isLocallyPending = saveDebounceMap.current.has(remote.id);
-                      const isLocalNewer = (local.updatedAt || 0) > (remote.updatedAt || 0);
-
-                      // Only update if remote is newer and not locally pending
-                      if (!isLocallyPending && !isLocalNewer) {
-                        merged[localIdx] = remote;
-                      }
-                    }
-                  }
-                  return merged;
-                });
-
-                // Maintain active document if present, otherwise set to first note
+                const updated = remoteNotes.map(ensureNoteFloatingNotes);
+                setNotes(updated);
                 setActiveNoteId((prevId) => {
-                  if (prevId && normalized.some((n) => n.id === prevId)) {
+                  if (prevId && updated.some((n) => n.id === prevId)) {
                     return prevId;
                   }
-                  return normalized[0]?.id || '';
+                  return updated[0]?.id || '';
                 });
               }
               setIsSyncing(false);
             },
             (err) => {
-              console.warn('Firestore sync notice:', err);
+              console.warn('Firestore subscription notice:', err);
               setIsSyncing(false);
             }
           );
         } catch (err) {
           console.warn('Initial cloud sync notice:', err);
+          setIsLoadingNotes(false);
           setIsSyncing(false);
+          setIsAuthInitializing(false);
         }
       } else {
+        if (!isExplicitlySignedOut.current) {
+          try {
+            const wasUnlocked = localStorage.getItem('iclick4free_passcode_unlocked') === 'true';
+            if (wasUnlocked) {
+              await handleSignInPasscode();
+              return;
+            }
+          } catch (e) {
+            console.warn('Auto passcode reconnect notice:', e);
+          }
+        }
+        setNotes([]);
+        setActiveNoteId('');
+        setIsLoadingNotes(false);
         setIsSyncing(false);
+        setIsAuthInitializing(false);
       }
     });
 
@@ -420,17 +414,9 @@ export default function App() {
     ];
   }, [activeNote?.id, activeNote?.floatingNotes, activeNote?.title, activeNote?.updatedAt]);
 
-  // Reliable flush of all pending in-memory and debounced saves to disk (localStorage) and cloud (Firestore)
+  // Reliable flush of all pending in-memory and debounced saves to cloud (Firestore)
   const flushPendingSaves = useCallback(() => {
-    // 1. Immediately persist full notes array to localStorage
-    try {
-      localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notesRef.current));
-    } catch (e) {
-      console.error('LocalStorage write error:', e);
-    }
-
-    // 2. Immediately execute cloud save of all notes
-    if (user) {
+    if (user && notesRef.current.length > 0) {
       saveAllNotesToFirestore(user.uid, notesRef.current).catch((err) =>
         console.error('Flush to Firestore error:', err)
       );
@@ -438,7 +424,7 @@ export default function App() {
     }
   }, [user]);
 
-  // Always-on debounced auto-save (saving is always active and reliable)
+  // Always-on debounced auto-save directly to Firebase Cloud Firestore
   const queueAutoSave = useCallback(
     (updatedNote: Note) => {
       const existing = saveDebounceMap.current.get(updatedNote.id);
@@ -448,12 +434,6 @@ export default function App() {
 
       const timer = setTimeout(async () => {
         try {
-          try {
-            localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notesRef.current));
-          } catch (e) {
-            console.error('LocalStorage write error:', e);
-          }
-
           if (user) {
             await saveAllNotesToFirestore(user.uid, notesRef.current);
           }
@@ -618,14 +598,6 @@ export default function App() {
         setActiveNoteId(loadedNote.id);
         setIsReadMode(false);
 
-        // Immediate write to localStorage
-        try {
-          localStorage.setItem(
-            STORAGE_KEY_NOTES,
-            JSON.stringify(nextNotes)
-          );
-        } catch {}
-
         // Immediate write to Firestore if authenticated
         if (user) {
           saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
@@ -702,15 +674,13 @@ export default function App() {
 
   const handleDeleteNote = async (id: string) => {
     flushPendingSaves();
-    if (notes.length <= 1) return;
     const remaining = notes.filter((n) => n.id !== id);
-    setNotes(remaining);
-    if (activeNoteId === id) {
-      setActiveNoteId(remaining[0]?.id || '');
-    }
+    const nextNotes = remaining.length > 0 ? remaining : [createBlankNote()];
+    setNotes(nextNotes);
+    setActiveNoteId(nextNotes[0]?.id || '');
 
     if (user) {
-      deleteNoteFromFirestore(user.uid, id, remaining).catch((err) =>
+      deleteNoteFromFirestore(user.uid, id, nextNotes).catch((err) =>
         console.error('Failed to delete note from Firestore:', err)
       );
     }
@@ -851,6 +821,16 @@ export default function App() {
     return true;
   });
 
+  // Connecting to Firebase initial check
+  if (isAuthInitializing) {
+    return (
+      <div className="min-h-screen w-full bg-zinc-950 flex flex-col items-center justify-center gap-3 text-zinc-400 font-sans">
+        <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+        <p className="text-xs font-medium tracking-wide text-zinc-300">Connecting to Firebase...</p>
+      </div>
+    );
+  }
+
   // If locked, present the passcode or Firebase login screen
   if (!isPasscodeUnlocked) {
     return (
@@ -866,6 +846,7 @@ export default function App() {
             await handleSignInAnonymous();
             setIsPasscodeUnlocked(true);
           }}
+          onSignInPasscode={handleSignInPasscode}
         />
         <AuthModal
           user={user}
@@ -891,6 +872,16 @@ export default function App() {
           onSignOut={handleSignOut}
         />
       </>
+    );
+  }
+
+  // Loading notes from Firebase
+  if (isLoadingNotes && user) {
+    return (
+      <div className="min-h-screen w-full bg-zinc-950 flex flex-col items-center justify-center gap-3 text-zinc-400 font-sans">
+        <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
+        <p className="text-xs font-medium tracking-wide text-zinc-300">Loading your workspace from Firebase...</p>
+      </div>
     );
   }
 
@@ -995,6 +986,7 @@ export default function App() {
             onSendWholeNoteToFloating={handleSendWholeNoteToFloating}
             onOpenExportModal={() => setShowExportModal(true)}
             onLoadFile={handleLoadFile}
+            onDeleteNote={handleDeleteNote}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-zinc-500">

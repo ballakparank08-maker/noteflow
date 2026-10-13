@@ -16,6 +16,7 @@ interface PasscodeLoginPageProps {
   onOpenAuth?: () => void;
   onSignInGoogle?: () => Promise<void>;
   onSignInGuest?: () => Promise<void>;
+  onSignInPasscode?: (code: string) => Promise<void>;
 }
 
 export const REQUIRED_PASSCODE = 'Teachmehowtodo-GGY';
@@ -34,6 +35,7 @@ export const PasscodeLoginPage: React.FC<PasscodeLoginPageProps> = ({
   onOpenAuth,
   onSignInGoogle,
   onSignInGuest,
+  onSignInPasscode,
 }) => {
   const [passcode, setPasscode] = useState('');
   const [showPasscode, setShowPasscode] = useState(false);
@@ -47,7 +49,7 @@ export const PasscodeLoginPage: React.FC<PasscodeLoginPageProps> = ({
     inputRef.current?.focus();
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -62,11 +64,15 @@ export const PasscodeLoginPage: React.FC<PasscodeLoginPageProps> = ({
     // Validate passcode
     if (isPasscodeValid(passcode)) {
       try {
-        localStorage.setItem('iclick4free_passcode_unlocked', 'true');
-      } catch {
-        // Handle storage quota / iframe sandbox
+        if (onSignInPasscode) {
+          await onSignInPasscode(passcode);
+        }
+        onUnlock();
+      } catch (err: unknown) {
+        setIsSubmitting(false);
+        setError(err instanceof Error ? err.message : 'Workspace connection failed');
+        inputRef.current?.focus();
       }
-      onUnlock();
     } else {
       setIsSubmitting(false);
       setError('Incorrect passcode. Please verify your code and try again.');

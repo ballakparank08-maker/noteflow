@@ -11,6 +11,7 @@ import {
   Download,
   FolderOpen,
   Table as TableIcon,
+  Trash2,
 } from 'lucide-react';
 
 interface NoteEditorProps {
@@ -24,6 +25,7 @@ interface NoteEditorProps {
   onSendWholeNoteToFloating: (note: Note) => void;
   onOpenExportModal: () => void;
   onLoadFile?: (file: File) => void;
+  onDeleteNote?: (id: string) => void;
 }
 
 export const NoteEditor: React.FC<NoteEditorProps> = ({
@@ -36,6 +38,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   onSendWholeNoteToFloating,
   onOpenExportModal,
   onLoadFile,
+  onDeleteNote,
 }) => {
   const [filterMode, setFilterMode] = useState<'all' | 'pending' | 'completed'>('all');
   const [copiedNotification, setCopiedNotification] = useState(false);
@@ -445,6 +448,18 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
                   </>
                 )}
               </button>
+
+              {onDeleteNote && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteNote(note.id)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-zinc-500 hover:text-red-400 hover:bg-zinc-900 rounded-md transition-colors cursor-pointer"
+                  title="Delete this document"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
+                </button>
+              )}
             </div>
           )}
         </div>
