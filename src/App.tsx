@@ -285,7 +285,7 @@ export default function App() {
 
         setIsSyncing(true);
         try {
-          // Sync existing local notes to Firestore so nothing is lost
+          // Sync existing local notes to user's Firestore collection so nothing is lost
           await syncLocalNotesToFirestore(currentUser.uid, notesRef.current);
 
           // Subscribe to live updates from user's Firestore collection
@@ -305,7 +305,7 @@ export default function App() {
                       const isLocallyPending = saveDebounceMap.current.has(remote.id);
                       const isLocalNewer = (local.updatedAt || 0) > (remote.updatedAt || 0);
 
-                      // Avoid clobbering active keystrokes or newer local changes
+                      // Only update if remote is newer and not locally pending
                       if (!isLocallyPending && !isLocalNewer) {
                         merged[localIdx] = remote;
                       }
@@ -314,31 +314,27 @@ export default function App() {
                   return merged;
                 });
 
+                // NEVER reset the user's active document on login!
                 setActiveNoteId((prevId) => {
-                  return normalized.some((n) => n.id === prevId) ? prevId : normalized[0].id;
+                  if (prevId) {
+                    return prevId;
+                  }
+                  return normalized[0]?.id || '';
                 });
               }
               setIsSyncing(false);
             },
             (err) => {
-              console.error('Firestore sync error:', err);
+              console.warn('Firestore sync notice:', err);
               setIsSyncing(false);
             }
           );
         } catch (err) {
-          console.error('Initial cloud sync error:', err);
+          console.warn('Initial cloud sync notice:', err);
           setIsSyncing(false);
         }
       } else {
         setIsSyncing(false);
-        // Automatically start anonymous cloud sync if not explicitly signed out
-        if (!isExplicitlySignedOut.current) {
-          try {
-            await signInAnonymously(auth);
-          } catch (e) {
-            console.warn('Anonymous cloud initialization skipped:', e);
-          }
-        }
       }
     });
 

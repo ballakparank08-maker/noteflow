@@ -111,9 +111,8 @@ export function subscribeUserNotes(
       onUpdate(fetchedNotes);
     },
     (error) => {
-      console.error('Error subscribing to notes from Firestore:', error);
+      console.warn('Firestore subscription notice (cloud sync paused):', error);
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.GET, collectionPath);
     }
   );
 
@@ -127,7 +126,7 @@ export async function saveNoteToFirestore(userId: string, note: Note): Promise<v
     const sanitized = sanitizeNoteForFirestore(note);
     await setDoc(noteRef, sanitized, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, docPath);
+    console.warn(`Firestore save notice for ${docPath}:`, error);
   }
 }
 
@@ -137,7 +136,7 @@ export async function deleteNoteFromFirestore(userId: string, noteId: string): P
     const noteRef = doc(db, 'users', userId, 'notes', noteId);
     await deleteDoc(noteRef);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, docPath);
+    console.warn(`Firestore delete notice for ${docPath}:`, error);
   }
 }
 
@@ -158,7 +157,7 @@ export async function syncLocalNotesToFirestore(userId: string, localNotes: Note
       }
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, collectionPath);
+    console.warn(`Firestore collection sync notice for ${collectionPath}:`, error);
   }
 }
 

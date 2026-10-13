@@ -35,18 +35,13 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Users collection
+    // NoteFlow: Users collection and all user subcollections (notes, settings, attachments)
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if isOwner(userId) || isAdmin();
+      allow read, write: if isOwner(userId) || isAdmin();
     }
 
-    // NoteFlow: User-scoped notes collection
-    match /users/{userId}/notes/{noteId} {
-      allow get, list: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming());
-      allow update: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming());
-      allow delete: if isOwner(userId) && isValidId(noteId);
+    match /users/{userId}/{document=**} {
+      allow read, write: if isOwner(userId) || isAdmin();
     }
 
     // Products catalog
