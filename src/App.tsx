@@ -299,20 +299,54 @@ export default function App() {
           setIsSyncing(false);
           setIsAuthInitializing(false);
 
-          // Real-time Firestore subscription
+          // Real-time Firestore subscription (safe merge that never interrupts active writing)
           unsubscribeFirestore = subscribeUserNotes(
             currentUser.uid,
             (remoteNotes) => {
-              if (remoteNotes.length > 0) {
-                const updated = remoteNotes.map(ensureNoteFloatingNotes);
-                setNotes(updated);
-                setActiveNoteId((prevId) => {
-                  if (prevId && updated.some((n) => n.id === prevId)) {
-                    return prevId;
+              if (remoteNotes.length === 0) return;
+
+              const normalized = remoteNotes.map(ensureNoteFloatingNotes);
+
+              setNotes((prevNotes) => {
+                const merged = [...prevNotes];
+                let hasChanges = false;
+
+                // Sync new or remotely updated notes
+                for (const remote of normalized) {
+                  const localIdx = merged.findIndex((n) => n.id === remote.id);
+                  if (localIdx === -1) {
+                    merged.push(remote);
+                    hasChanges = true;
+                  } else {
+                    const local = merged[localIdx];
+                    const isLocallyPending = saveDebounceMap.current.has(remote.id);
+                    const isRemoteNewer = (remote.updatedAt || 0) > (local.updatedAt || 0);
+
+                    // Strictly only update if remote is newer and not being actively edited right now!
+                    if (isRemoteNewer && !isLocallyPending) {
+                      merged[localIdx] = remote;
+                      hasChanges = true;
+                    }
                   }
-                  return updated[0]?.id || '';
-                });
-              }
+                }
+
+                // Remove notes deleted remotely, unless currently being edited
+                const remoteIds = new Set(normalized.map((n) => n.id));
+                const filtered = merged.filter(
+                  (n) => remoteIds.has(n.id) || saveDebounceMap.current.has(n.id)
+                );
+
+                if (filtered.length !== merged.length) {
+                  hasChanges = true;
+                }
+
+                const result = filtered.length !== merged.length ? filtered : (hasChanges ? merged : prevNotes);
+                if (hasChanges) {
+                  notesRef.current = result;
+                }
+                return result;
+              });
+
               setIsSyncing(false);
             },
             (err) => {
@@ -651,9 +685,10 @@ export default function App() {
     }
   };
 
-  // Update active document and save to Firestore & localStorage (debounced auto-save)
+  // Update active document and save to Firestore (debounced auto-save)
   const handleUpdateActiveNote = useCallback(
     (updates: Partial<Note>) => {
+      let updatedNoteToSave: Note | null = null;
       setNotes((prev) => {
         const idx = prev.findIndex((n) => n.id === activeNoteId);
         if (idx === -1) return prev;
@@ -663,11 +698,16 @@ export default function App() {
           ...updates,
           updatedAt: Date.now(),
         };
+        updatedNoteToSave = updatedNote;
         const nextNotes = [...prev];
         nextNotes[idx] = updatedNote;
-        queueAutoSave(updatedNote);
+        notesRef.current = nextNotes;
         return nextNotes;
       });
+
+      if (updatedNoteToSave) {
+        queueAutoSave(updatedNoteToSave);
+      }
     },
     [activeNoteId, queueAutoSave]
   );
