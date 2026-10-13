@@ -146,8 +146,16 @@ export const PasscodeLoginPage: React.FC<PasscodeLoginPageProps> = ({
               Unlock Workspace
             </h1>
             <p className="text-xs sm:text-sm text-zinc-400 max-w-xs leading-relaxed">
-              Sign in with your Firebase cloud account or unlock using your workspace passcode.
+              Sign in with your cloud account to sync notes across devices, or enter your workspace passcode.
             </p>
+          </div>
+
+          {/* Cross-device sync prompt */}
+          <div className="w-full p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300 leading-relaxed flex items-start gap-2 shadow-sm">
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+            <span>
+              <strong>Cross-Device Sync:</strong> Sign in with Google or Email below to instantly load and edit notes from your PC on mobile.
+            </span>
           </div>
 
           {/* Firebase Fast Login Buttons */}

@@ -15,7 +15,7 @@ import { ExportModal } from './components/ExportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { AuthModal } from './components/AuthModal';
 import { loadFileToNote } from './utils/fileLoader';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, Cloud } from 'lucide-react';
 import {
   auth,
   signInWithPopup,
@@ -31,6 +31,7 @@ import {
 } from './firebase';
 import {
   subscribeUserNotes,
+  saveAllNotesToFirestore,
   saveNoteToFirestore,
   deleteNoteFromFirestore,
   syncLocalNotesToFirestore,
@@ -265,6 +266,9 @@ export default function App() {
     }
   }, [wordSize]);
 
+  // Ref to debounce Firestore writes
+  const saveDebounceMap = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
   // Firebase Auth & Firestore live synchronization
   useEffect(() => {
     let unsubscribeFirestore: (() => void) | null = null;
@@ -285,10 +289,20 @@ export default function App() {
 
         setIsSyncing(true);
         try {
-          // Sync existing local notes to user's Firestore collection so nothing is lost
-          await syncLocalNotesToFirestore(currentUser.uid, notesRef.current);
+          // Sync existing local notes to user's Firestore document & resolve merged notes
+          const mergedNotes = await syncLocalNotesToFirestore(currentUser.uid, notesRef.current);
+          if (mergedNotes && mergedNotes.length > 0) {
+            const normalized = mergedNotes.map(ensureNoteFloatingNotes);
+            setNotes(normalized);
+            setActiveNoteId((prevId) => {
+              if (prevId && normalized.some((n) => n.id === prevId)) {
+                return prevId;
+              }
+              return normalized[0]?.id || '';
+            });
+          }
 
-          // Subscribe to live updates from user's Firestore collection
+          // Subscribe to live updates from user's Firestore document
           unsubscribeFirestore = subscribeUserNotes(
             currentUser.uid,
             (remoteNotes) => {
@@ -314,9 +328,9 @@ export default function App() {
                   return merged;
                 });
 
-                // NEVER reset the user's active document on login!
+                // Maintain active document if present, otherwise set to first note
                 setActiveNoteId((prevId) => {
-                  if (prevId) {
+                  if (prevId && normalized.some((n) => n.id === prevId)) {
                     return prevId;
                   }
                   return normalized[0]?.id || '';
@@ -406,9 +420,6 @@ export default function App() {
     ];
   }, [activeNote?.id, activeNote?.floatingNotes, activeNote?.title, activeNote?.updatedAt]);
 
-  // Ref to debounce Firestore writes
-  const saveDebounceMap = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
   // Reliable flush of all pending in-memory and debounced saves to disk (localStorage) and cloud (Firestore)
   const flushPendingSaves = useCallback(() => {
     // 1. Immediately persist full notes array to localStorage
@@ -418,17 +429,11 @@ export default function App() {
       console.error('LocalStorage write error:', e);
     }
 
-    // 2. Immediately execute any pending Firestore debounce writes
-    if (user && saveDebounceMap.current.size > 0) {
-      saveDebounceMap.current.forEach((timer, noteId) => {
-        clearTimeout(timer);
-        const noteToSave = notesRef.current.find((n) => n.id === noteId);
-        if (noteToSave) {
-          saveNoteToFirestore(user.uid, noteToSave).catch((err) =>
-            console.error('Flush to Firestore error:', err)
-          );
-        }
-      });
+    // 2. Immediately execute cloud save of all notes
+    if (user) {
+      saveAllNotesToFirestore(user.uid, notesRef.current).catch((err) =>
+        console.error('Flush to Firestore error:', err)
+      );
       saveDebounceMap.current.clear();
     }
   }, [user]);
@@ -450,9 +455,7 @@ export default function App() {
           }
 
           if (user) {
-            const freshestNote =
-              notesRef.current.find((n) => n.id === updatedNote.id) || updatedNote;
-            await saveNoteToFirestore(user.uid, freshestNote);
+            await saveAllNotesToFirestore(user.uid, notesRef.current);
           }
         } catch (err) {
           console.error('Failed to auto-save note:', err);
@@ -591,17 +594,16 @@ export default function App() {
       ],
     };
 
-    setNotes((prev) => [newNote, ...prev]);
+    const nextNotes = [newNote, ...notesRef.current];
+    setNotes(nextNotes);
     setActiveNoteId(newNote.id);
     setIsReadMode(false);
 
     // Save to Firestore if user is authenticated
     if (user) {
-      try {
-        await saveNoteToFirestore(user.uid, newNote);
-      } catch (err) {
-        console.error('Failed to save new note to Firestore:', err);
-      }
+      saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
+        console.error('Failed to save new note to Firestore:', err)
+      );
     }
   };
 
@@ -611,7 +613,8 @@ export default function App() {
       try {
         flushPendingSaves();
         const loadedNote = await loadFileToNote(file);
-        setNotes((prev) => [loadedNote, ...prev]);
+        const nextNotes = [loadedNote, ...notesRef.current];
+        setNotes(nextNotes);
         setActiveNoteId(loadedNote.id);
         setIsReadMode(false);
 
@@ -619,13 +622,15 @@ export default function App() {
         try {
           localStorage.setItem(
             STORAGE_KEY_NOTES,
-            JSON.stringify([loadedNote, ...notesRef.current])
+            JSON.stringify(nextNotes)
           );
         } catch {}
 
         // Immediate write to Firestore if authenticated
         if (user) {
-          await saveNoteToFirestore(user.uid, loadedNote);
+          saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
+            console.error('Failed to load file to Firestore:', err)
+          );
         }
       } catch (err) {
         console.error('Failed to load file:', err);
@@ -705,11 +710,9 @@ export default function App() {
     }
 
     if (user) {
-      try {
-        await deleteNoteFromFirestore(user.uid, id);
-      } catch (err) {
-        console.error('Failed to delete note from Firestore:', err);
-      }
+      deleteNoteFromFirestore(user.uid, id, remaining).catch((err) =>
+        console.error('Failed to delete note from Firestore:', err)
+      );
     }
   };
 
@@ -732,15 +735,14 @@ export default function App() {
       })),
     };
 
-    setNotes((prev) => [duplicated, ...prev]);
+    const nextNotes = [duplicated, ...notesRef.current];
+    setNotes(nextNotes);
     setActiveNoteId(duplicated.id);
 
     if (user) {
-      try {
-        await saveNoteToFirestore(user.uid, duplicated);
-      } catch (err) {
-        console.error('Failed to save duplicated note to Firestore:', err);
-      }
+      saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
+        console.error('Failed to save duplicated note to Firestore:', err)
+      );
     }
   };
 
@@ -748,15 +750,14 @@ export default function App() {
     const target = notes.find((n) => n.id === id);
     if (!target) return;
     const updated = { ...target, isPinned: !target.isPinned, updatedAt: Date.now() };
+    const nextNotes = notes.map((n) => (n.id === id ? updated : n));
 
-    setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)));
+    setNotes(nextNotes);
 
     if (user) {
-      try {
-        await saveNoteToFirestore(user.uid, updated);
-      } catch (err) {
-        console.error('Failed to update pin state in Firestore:', err);
-      }
+      saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
+        console.error('Failed to update pin state in Firestore:', err)
+      );
     }
   };
 
@@ -944,6 +945,23 @@ export default function App() {
         onLockApp={handleLockApp}
         onLoadFile={handleLoadFile}
       />
+
+      {/* Mobile banner to remind user to sign in to access PC notes */}
+      {!user && (
+        <div className="sm:hidden flex items-center justify-between px-3 py-1.5 bg-emerald-950/40 border-b border-emerald-900/50 text-[11px] text-emerald-300">
+          <div className="flex items-center gap-1.5 truncate">
+            <Cloud className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span className="truncate">Local offline mode.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsAuthModalOpen(true)}
+            className="ml-2 px-2.5 py-0.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold rounded text-[10px] shrink-0 transition-colors cursor-pointer shadow-sm"
+          >
+            Sync from PC
+          </button>
+        </div>
+      )}
 
       {/* Main Workspace: Sidebar + Document Workspace */}
       <div className="flex flex-1 overflow-hidden relative">
