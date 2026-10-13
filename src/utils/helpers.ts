@@ -11,33 +11,25 @@ export function createDefaultTableData(): TableData {
 
   return {
     columns: [
-      { id: col1, title: 'Item / Task', isChecklist: true },
-      { id: col2, title: 'Review Status', isChecklist: true },
-      { id: col3, title: 'Sign-off', isChecklist: true },
+      { id: col1, title: 'Credit', isChecklist: true },
+      { id: col2, title: 'Card', isChecklist: true },
+      { id: col3, title: 'Details', isChecklist: true },
     ],
     rows: [
       {
         id: generateId('row'),
         cells: [
-          { id: generateId('cell'), text: 'Define project scope & goals', isChecklist: true, checked: true },
-          { id: generateId('cell'), text: 'Peer reviewed', isChecklist: true, checked: true },
-          { id: generateId('cell'), text: 'Approved', isChecklist: true, checked: false },
+          { id: generateId('cell'), text: 'Numbers', isChecklist: true, checked: false },
+          { id: generateId('cell'), text: 'Branch', isChecklist: true, checked: false },
+          { id: generateId('cell'), text: 'Amount', isChecklist: true, checked: false },
         ],
       },
       {
         id: generateId('row'),
         cells: [
-          { id: generateId('cell'), text: 'Prepare documentation & checklist', isChecklist: true, checked: true },
-          { id: generateId('cell'), text: 'In progress', isChecklist: true, checked: false },
-          { id: generateId('cell'), text: 'Pending', isChecklist: true, checked: false },
-        ],
-      },
-      {
-        id: generateId('row'),
-        cells: [
-          { id: generateId('cell'), text: 'Final client QA walkthrough', isChecklist: true, checked: false },
-          { id: generateId('cell'), text: 'Scheduled', isChecklist: true, checked: false },
-          { id: generateId('cell'), text: 'Pending', isChecklist: true, checked: false },
+          { id: generateId('cell'), text: 'Date', isChecklist: true, checked: false },
+          { id: generateId('cell'), text: 'Website name', isChecklist: true, checked: false },
+          { id: generateId('cell'), text: 'Case Number', isChecklist: true, checked: false },
         ],
       },
     ],
