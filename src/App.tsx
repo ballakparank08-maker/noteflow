@@ -14,7 +14,7 @@ import { ExportModal } from './components/ExportModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { AuthModal } from './components/AuthModal';
 import { loadFileToNote } from './utils/fileLoader';
-import { FolderOpen, Cloud, Loader2 } from 'lucide-react';
+import { Cloud, Loader2 } from 'lucide-react';
 import {
   auth,
   signInWithPopup,
@@ -658,45 +658,6 @@ export default function App() {
     [user]
   );
 
-  // Drag and drop state for desktop file loading
-  const [isDraggingFile, setIsDraggingFile] = useState(false);
-  const dragCounter = useRef(0);
-
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounter.current += 1;
-    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
-      setIsDraggingFile(true);
-    }
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragCounter.current -= 1;
-    if (dragCounter.current <= 0) {
-      dragCounter.current = 0;
-      setIsDraggingFile(false);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingFile(false);
-    dragCounter.current = 0;
-
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      await handleLoadFile(files[0]);
-    }
-  };
 
   // Update active document locally (pure in-memory, ZERO background network write while typing!)
   const handleUpdateActiveNote = useCallback(
@@ -962,26 +923,10 @@ export default function App() {
 
   return (
     <div
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
       className={`min-h-screen w-full max-w-full overflow-x-hidden flex flex-col bg-zinc-950 text-zinc-100 font-sans selection:bg-zinc-800 selection:text-white relative ${
         isFullscreen ? 'fixed inset-0 z-50 overflow-hidden' : ''
       }`}
     >
-      {/* Drag & Drop File Loader Overlay */}
-      {isDraggingFile && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm border-2 border-dashed border-indigo-500/80 m-4 rounded-3xl flex flex-col items-center justify-center p-8 pointer-events-none animate-in fade-in duration-150">
-          <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 mb-3 shadow-lg">
-            <FolderOpen className="w-10 h-10 animate-pulse" />
-          </div>
-          <p className="text-base font-semibold text-white">Drop file to load into Noteflow</p>
-          <p className="text-xs text-zinc-400 mt-1">
-            Supports Markdown (.md), Text (.txt), JSON (.json), and CSV/TSV tables
-          </p>
-        </div>
-      )}
       {/* 3-Zone Top Navigation Contract */}
       <TopNavbar
         currentFilter={currentFilter}
