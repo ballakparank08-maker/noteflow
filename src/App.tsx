@@ -20,9 +20,13 @@ import {
   googleProvider,
   signOut,
   onAuthStateChanged,
+  signInAnonymously,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updateProfile,
   User,
 } from './firebase';
-import { signInAnonymously } from 'firebase/auth';
 import {
   subscribeUserNotes,
   saveNoteToFirestore,
@@ -204,6 +208,7 @@ export default function App() {
 
   // Database & User authentication state
   const [user, setUser] = useState<User | null>(null);
+  const isExplicitlySignedOut = useRef<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
@@ -292,6 +297,11 @@ export default function App() {
       }
 
       if (currentUser) {
+        setIsPasscodeUnlocked(true);
+        try {
+          localStorage.setItem('iclick4free_passcode_unlocked', 'true');
+        } catch {}
+
         setIsSyncing(true);
         try {
           // Sync existing local notes to Firestore so nothing is lost
@@ -303,7 +313,26 @@ export default function App() {
             (remoteNotes) => {
               if (remoteNotes.length > 0) {
                 const normalized = remoteNotes.map(ensureNoteFloatingNotes);
-                setNotes(normalized);
+                setNotes((prevNotes) => {
+                  const merged = [...prevNotes];
+                  for (const remote of normalized) {
+                    const localIdx = merged.findIndex((n) => n.id === remote.id);
+                    if (localIdx === -1) {
+                      merged.push(remote);
+                    } else {
+                      const local = merged[localIdx];
+                      const isLocallyPending = saveDebounceMap.current.has(remote.id);
+                      const isLocalNewer = (local.updatedAt || 0) > (remote.updatedAt || 0);
+
+                      // Avoid clobbering active keystrokes or newer local changes
+                      if (!isLocallyPending && !isLocalNewer) {
+                        merged[localIdx] = remote;
+                      }
+                    }
+                  }
+                  return merged;
+                });
+
                 setActiveNoteId((prevId) => {
                   return normalized.some((n) => n.id === prevId) ? prevId : normalized[0].id;
                 });
@@ -321,6 +350,14 @@ export default function App() {
         }
       } else {
         setIsSyncing(false);
+        // Automatically start anonymous cloud sync if not explicitly signed out
+        if (!isExplicitlySignedOut.current) {
+          try {
+            await signInAnonymously(auth);
+          } catch (e) {
+            console.warn('Anonymous cloud initialization skipped:', e);
+          }
+        }
       }
     });
 
@@ -415,7 +452,9 @@ export default function App() {
           }
 
           if (user) {
-            await saveNoteToFirestore(user.uid, updatedNote);
+            const freshestNote =
+              notesRef.current.find((n) => n.id === updatedNote.id) || updatedNote;
+            await saveNoteToFirestore(user.uid, freshestNote);
           }
 
           setAutoSaveStatus('saved');
@@ -433,13 +472,14 @@ export default function App() {
   );
 
   const handleForceSave = useCallback(async () => {
-    if (!activeNote) return;
+    const targetNote = notesRef.current.find((n) => n.id === activeNoteId) || activeNote;
+    if (!targetNote) return;
     setAutoSaveStatus('saving');
 
-    const existing = saveDebounceMap.current.get(activeNote.id);
+    const existing = saveDebounceMap.current.get(targetNote.id);
     if (existing) {
       clearTimeout(existing);
-      saveDebounceMap.current.delete(activeNote.id);
+      saveDebounceMap.current.delete(targetNote.id);
     }
 
     try {
@@ -448,7 +488,7 @@ export default function App() {
       } catch {}
 
       if (user) {
-        await saveNoteToFirestore(user.uid, activeNote);
+        await saveNoteToFirestore(user.uid, targetNote);
       }
 
       setTimeout(() => {
@@ -458,7 +498,7 @@ export default function App() {
       console.error('Failed to force save note:', err);
       setAutoSaveStatus('error');
     }
-  }, [activeNote, user]);
+  }, [activeNoteId, activeNote, user]);
 
   // Flush unsaved changes immediately on document switch
   const handleSelectNote = useCallback(
@@ -517,14 +557,34 @@ export default function App() {
 
   // Auth actions
   const handleSignInGoogle = async () => {
+    isExplicitlySignedOut.current = false;
     await signInWithPopup(auth, googleProvider);
   };
 
   const handleSignInAnonymous = async () => {
+    isExplicitlySignedOut.current = false;
     await signInAnonymously(auth);
   };
 
+  const handleSignInEmail = async (email: string, pass: string) => {
+    isExplicitlySignedOut.current = false;
+    await signInWithEmailAndPassword(auth, email, pass);
+  };
+
+  const handleSignUpEmail = async (email: string, pass: string, displayName: string) => {
+    isExplicitlySignedOut.current = false;
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    if (displayName && cred.user) {
+      await updateProfile(cred.user, { displayName });
+    }
+  };
+
+  const handleResetPassword = async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
+  };
+
   const handleSignOut = async () => {
+    isExplicitlySignedOut.current = true;
     await signOut(auth);
   };
 
@@ -577,16 +637,25 @@ export default function App() {
   };
 
   // Update active document and save to Firestore & localStorage (debounced auto-save)
-  const handleUpdateActiveNote = async (updates: Partial<Note>) => {
-    if (!activeNote) return;
-    const updatedNote = { ...activeNote, ...updates, updatedAt: Date.now() };
-
-    setNotes((prev) =>
-      prev.map((n) => (n.id === activeNote.id ? updatedNote : n))
-    );
-
-    queueAutoSave(updatedNote);
-  };
+  const handleUpdateActiveNote = useCallback(
+    (updates: Partial<Note>) => {
+      setNotes((prev) => {
+        const idx = prev.findIndex((n) => n.id === activeNoteId);
+        if (idx === -1) return prev;
+        const current = prev[idx];
+        const updatedNote: Note = {
+          ...current,
+          ...updates,
+          updatedAt: Date.now(),
+        };
+        const nextNotes = [...prev];
+        nextNotes[idx] = updatedNote;
+        queueAutoSave(updatedNote);
+        return nextNotes;
+      });
+    },
+    [activeNoteId, queueAutoSave]
+  );
 
   const handleDeleteNote = async (id: string) => {
     if (notes.length <= 1) return;
@@ -741,9 +810,47 @@ export default function App() {
     return true;
   });
 
-  // If locked, present the passcode-only login screen
+  // If locked, present the passcode or Firebase login screen
   if (!isPasscodeUnlocked) {
-    return <PasscodeLoginPage onUnlock={() => setIsPasscodeUnlocked(true)} />;
+    return (
+      <>
+        <PasscodeLoginPage
+          onUnlock={() => setIsPasscodeUnlocked(true)}
+          onOpenAuth={() => setIsAuthModalOpen(true)}
+          onSignInGoogle={async () => {
+            await handleSignInGoogle();
+            setIsPasscodeUnlocked(true);
+          }}
+          onSignInGuest={async () => {
+            await handleSignInAnonymous();
+            setIsPasscodeUnlocked(true);
+          }}
+        />
+        <AuthModal
+          user={user}
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          onSignInGoogle={async () => {
+            await handleSignInGoogle();
+            setIsPasscodeUnlocked(true);
+          }}
+          onSignInAnonymous={async () => {
+            await handleSignInAnonymous();
+            setIsPasscodeUnlocked(true);
+          }}
+          onSignInEmail={async (email, pass) => {
+            await handleSignInEmail(email, pass);
+            setIsPasscodeUnlocked(true);
+          }}
+          onSignUpEmail={async (email, pass, name) => {
+            await handleSignUpEmail(email, pass, name);
+            setIsPasscodeUnlocked(true);
+          }}
+          onResetPassword={handleResetPassword}
+          onSignOut={handleSignOut}
+        />
+      </>
+    );
   }
 
   return (
@@ -860,6 +967,9 @@ export default function App() {
         onClose={() => setIsAuthModalOpen(false)}
         onSignInGoogle={handleSignInGoogle}
         onSignInAnonymous={handleSignInAnonymous}
+        onSignInEmail={handleSignInEmail}
+        onSignUpEmail={handleSignUpEmail}
+        onResetPassword={handleResetPassword}
         onSignOut={handleSignOut}
       />
     </div>

@@ -145,11 +145,15 @@ export async function syncLocalNotesToFirestore(userId: string, localNotes: Note
   const collectionPath = `users/${userId}/notes`;
   try {
     const existingSnap = await getDocs(collection(db, 'users', userId, 'notes'));
-    const existingIds = new Set(existingSnap.docs.map((d) => d.id));
+    const remoteDocs = new Map<string, { updatedAt?: number }>();
+    existingSnap.docs.forEach((d) => {
+      remoteDocs.set(d.id, d.data() as { updatedAt?: number });
+    });
 
-    // Upload local notes that are missing in Firestore or newer
+    // Upload local notes that are either missing in Firestore or newer than remote
     for (const note of localNotes) {
-      if (!existingIds.has(note.id)) {
+      const remote = remoteDocs.get(note.id);
+      if (!remote || (note.updatedAt || 0) > (remote.updatedAt || 0)) {
         await saveNoteToFirestore(userId, note);
       }
     }
@@ -157,3 +161,4 @@ export async function syncLocalNotesToFirestore(userId: string, localNotes: Note
     handleFirestoreError(error, OperationType.WRITE, collectionPath);
   }
 }
+
