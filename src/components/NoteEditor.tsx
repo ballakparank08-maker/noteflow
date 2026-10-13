@@ -9,6 +9,7 @@ import {
   Layers,
   Check,
   Download,
+  FolderOpen,
   Table as TableIcon,
 } from 'lucide-react';
 
@@ -22,6 +23,7 @@ interface NoteEditorProps {
   onSendToFloatingPad: (block: ParagraphBlock) => void;
   onSendWholeNoteToFloating: (note: Note) => void;
   onOpenExportModal: () => void;
+  onLoadFile?: (file: File) => void;
 }
 
 export const NoteEditor: React.FC<NoteEditorProps> = ({
@@ -33,11 +35,13 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   onSendToFloatingPad,
   onSendWholeNoteToFloating,
   onOpenExportModal,
+  onLoadFile,
 }) => {
   const [filterMode, setFilterMode] = useState<'all' | 'pending' | 'completed'>('all');
   const [copiedNotification, setCopiedNotification] = useState(false);
   const [allowScriptEditInFullscreen, setAllowScriptEditInFullscreen] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const editorFileInputRef = useRef<HTMLInputElement>(null);
 
   // In Read Mode or Fullscreen (unless explicitly unlocked), script editing is locked,
   // while checklists remain 100% interactive and operable!
@@ -389,12 +393,39 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               <button
                 type="button"
                 onClick={onOpenExportModal}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-md transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-md transition-colors cursor-pointer"
                 title="Export as Markdown or plain text"
               >
                 <Download className="w-3.5 h-3.5 text-zinc-400" />
                 <span>Export</span>
               </button>
+
+              {onLoadFile && (
+                <>
+                  <input
+                    type="file"
+                    ref={editorFileInputRef}
+                    className="hidden"
+                    accept=".md,.markdown,.txt,.json,.csv,.tsv"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        onLoadFile(file);
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => editorFileInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-md transition-colors cursor-pointer"
+                    title="Load file from computer (.md, .txt, .json, .csv)"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Load File</span>
+                  </button>
+                </>
+              )}
 
               <button
                 type="button"

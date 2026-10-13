@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ParagraphBlock, TableData, TableRow, TableCell, TableColumn, WordSize } from '../types';
+import { ParagraphBlock, TableData, TableRow, TableCell, TableColumn, WordSize, CellAttachment } from '../types';
 import { generateId } from '../utils/helpers';
+import { FilePreviewModal } from './FilePreviewModal';
 import {
   CheckSquare,
   Square,
@@ -14,6 +15,7 @@ import {
   FileText,
   X,
   Download,
+  Eye,
 } from 'lucide-react';
 
 interface TableBlockItemProps {
@@ -67,6 +69,7 @@ export const TableBlockItem: React.FC<TableBlockItemProps> = ({
   }, [block.tableData]);
 
   const [activeCellAction, setActiveCellAction] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<CellAttachment | null>(null);
 
   const updateTableData = (newTableData: TableData) => {
     onUpdate(block.id, {
@@ -594,23 +597,24 @@ export const TableBlockItem: React.FC<TableBlockItemProps> = ({
                             <FileText className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                             <span
                               className="truncate text-zinc-200 hover:text-indigo-300 cursor-pointer select-none font-medium flex-1 text-[11px]"
-                              title={`${cell.file.name} (${Math.round((cell.file.size || 0) / 1024)} KB) - Click to download`}
-                              onClick={() => {
-                                if (cell.file?.dataUrl) {
-                                  const a = document.createElement('a');
-                                  a.href = cell.file.dataUrl;
-                                  a.download = cell.file.name;
-                                  document.body.appendChild(a);
-                                  a.click();
-                                  document.body.removeChild(a);
-                                }
-                              }}
+                              title={`${cell.file.name} (${Math.round((cell.file.size || 0) / 1024)} KB) - Click to load & preview`}
+                              onClick={() => setPreviewFile(cell.file || null)}
                             >
                               {cell.file.name}
                             </span>
                             <span className="text-[10px] text-zinc-500 shrink-0">
                               {Math.round((cell.file.size || 0) / 1024)}KB
                             </span>
+                            {cell.file.dataUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewFile(cell.file || null)}
+                                className="text-zinc-400 hover:text-indigo-300 p-0.5 cursor-pointer shrink-0"
+                                title="Load and preview file"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             {cell.file.dataUrl && (
                               <button
                                 type="button"
@@ -692,6 +696,14 @@ export const TableBlockItem: React.FC<TableBlockItemProps> = ({
             {tableData.rows.length} rows × {tableData.columns.length} columns · Checklists in every column
           </span>
         </div>
+      )}
+
+      {/* File Preview Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+        />
       )}
     </div>
   );

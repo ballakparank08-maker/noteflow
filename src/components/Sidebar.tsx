@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Note } from '../types';
 import { formatTimeAgo, getChecklistStats } from '../utils/helpers';
-import { Search, Pin, Trash2, Copy, FileText, CheckSquare, X, Lock } from 'lucide-react';
+import { Search, Pin, Trash2, Copy, FileText, CheckSquare, X, Lock, FolderOpen } from 'lucide-react';
 
 interface SidebarProps {
   notes: Note[];
@@ -15,6 +15,7 @@ interface SidebarProps {
   isOpenMobile: boolean;
   onCloseMobile: () => void;
   onLockApp?: () => void;
+  onLoadFile?: (file: File) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -29,7 +30,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile,
   onCloseMobile,
   onLockApp,
+  onLoadFile,
 }) => {
+  const sidebarFileInputRef = useRef<HTMLInputElement>(null);
   const filteredNotes = notes.filter((n) => {
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
@@ -77,9 +80,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Search Bar */}
-        <div className="p-3 border-b border-zinc-850">
-          <div className="relative">
+        {/* Search Bar + Quick Load */}
+        <div className="p-3 border-b border-zinc-850 flex items-center gap-2">
+          <div className="relative flex-1">
             <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
             <input
               type="text"
@@ -98,6 +101,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
           </div>
+          {onLoadFile && (
+            <>
+              <input
+                type="file"
+                ref={sidebarFileInputRef}
+                className="hidden"
+                accept=".md,.markdown,.txt,.json,.csv,.tsv"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) onLoadFile(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => sidebarFileInputRef.current?.click()}
+                className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                title="Load file into Noteflow (.md, .txt, .json, .csv)"
+              >
+                <FolderOpen className="w-4 h-4" />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Notes List */}

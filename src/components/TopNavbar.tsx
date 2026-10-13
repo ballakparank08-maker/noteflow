@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Plus,
   Layers,
@@ -14,6 +14,7 @@ import {
   Lock,
   MoreHorizontal,
   X,
+  FolderOpen,
 } from 'lucide-react';
 import { WordSize } from '../types';
 import type { User } from '../firebase';
@@ -38,6 +39,7 @@ interface TopNavbarProps {
   onSignIn: () => void;
   onSignOut: () => void;
   onLockApp?: () => void;
+  onLoadFile?: (file: File) => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -60,8 +62,10 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onSignIn,
   onSignOut,
   onLockApp,
+  onLoadFile,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // In Reading View: strictly show only the brand and EXACTLY 1 button: 'Exit'
   if (isReadMode) {
@@ -426,11 +430,54 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                     <Keyboard className="w-3.5 h-3.5 text-zinc-400" />
                     <span>Shortcuts Reference</span>
                   </button>
+
+                  {onLoadFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        fileInputRef.current?.click();
+                      }}
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800 text-left transition-colors"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Load File (.md, .txt, .json)</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </>
           )}
         </div>
+
+        {/* Load File Action Button */}
+        {onLoadFile && (
+          <>
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".md,.markdown,.txt,.json,.csv,.tsv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  onLoadFile(file);
+                }
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded-lg transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
+              title="Load / Import file (.md, .txt, .json, .csv)"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
+              <span className="hidden md:inline">Load File</span>
+              <span className="md:hidden text-[11px]">Load</span>
+            </button>
+          </>
+        )}
 
         {/* New Note CTA */}
         <button
