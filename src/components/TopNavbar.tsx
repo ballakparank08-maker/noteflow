@@ -12,12 +12,10 @@ import {
   Loader2,
   LogOut,
   Lock,
-  Check,
-  AlertCircle,
   MoreHorizontal,
   X,
 } from 'lucide-react';
-import { WordSize, AutoSaveStatus } from '../types';
+import { WordSize } from '../types';
 import type { User } from '../firebase';
 
 interface TopNavbarProps {
@@ -40,9 +38,6 @@ interface TopNavbarProps {
   onSignIn: () => void;
   onSignOut: () => void;
   onLockApp?: () => void;
-  autoSaveStatus: AutoSaveStatus;
-  isAutoSaveEnabled: boolean;
-  onForceSave: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -65,9 +60,6 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onSignIn,
   onSignOut,
   onLockApp,
-  autoSaveStatus,
-  isAutoSaveEnabled,
-  onForceSave,
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -161,39 +153,6 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
       {/* Zone 3: Primary actions */}
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-        {/* Real-time Auto-Save Status & Trigger */}
-        <button
-          type="button"
-          onClick={onForceSave}
-          className={`flex items-center gap-1 px-1.5 sm:px-2.5 py-1 text-xs rounded-lg border transition-all cursor-pointer ${
-            autoSaveStatus === 'saving'
-              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-              : autoSaveStatus === 'error'
-              ? 'bg-rose-500/10 border-rose-500/30 text-rose-300 hover:bg-rose-500/20'
-              : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700'
-          }`}
-          title={
-            isAutoSaveEnabled
-              ? 'Auto-save is active. Changes are continuously saved to your device and database. Click or press Ctrl+S to save immediately.'
-              : 'Auto-save is paused. Click to save now.'
-          }
-        >
-          {autoSaveStatus === 'saving' ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
-          ) : autoSaveStatus === 'error' ? (
-            <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-          ) : (
-            <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          )}
-          <span className="hidden md:inline font-mono text-[11px]">
-            {autoSaveStatus === 'saving'
-              ? 'Auto-saving...'
-              : autoSaveStatus === 'error'
-              ? 'Save Error'
-              : 'Auto-saved'}
-          </span>
-        </button>
-
         {/* Database Cloud Sync / User Profile */}
         {user ? (
           <div

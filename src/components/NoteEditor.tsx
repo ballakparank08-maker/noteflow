@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Note, ParagraphBlock, WordSize, AutoSaveStatus } from '../types';
+import { Note, ParagraphBlock, WordSize } from '../types';
 import { generateId, getChecklistStats, formatTimeAgo, reorderParagraphs, createDefaultTableData } from '../utils/helpers';
 import { ParagraphBlockItem } from './ParagraphBlockItem';
 import {
@@ -9,9 +9,6 @@ import {
   Layers,
   Check,
   Download,
-  Loader2,
-  AlertCircle,
-  Save,
   Table as TableIcon,
 } from 'lucide-react';
 
@@ -25,9 +22,6 @@ interface NoteEditorProps {
   onSendToFloatingPad: (block: ParagraphBlock) => void;
   onSendWholeNoteToFloating: (note: Note) => void;
   onOpenExportModal: () => void;
-  autoSaveStatus?: AutoSaveStatus;
-  isAutoSaveEnabled?: boolean;
-  onForceSave?: () => void;
 }
 
 export const NoteEditor: React.FC<NoteEditorProps> = ({
@@ -39,9 +33,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   onSendToFloatingPad,
   onSendWholeNoteToFloating,
   onOpenExportModal,
-  autoSaveStatus = 'saved',
-  isAutoSaveEnabled = true,
-  onForceSave,
 }) => {
   const [filterMode, setFilterMode] = useState<'all' | 'pending' | 'completed'>('all');
   const [copiedNotification, setCopiedNotification] = useState(false);
@@ -329,35 +320,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               </>
             )}
 
-            {/* Auto-Save Live Status Indicator */}
-            <span aria-hidden="true">·</span>
-            {autoSaveStatus === 'saving' ? (
-              <span className="inline-flex items-center gap-1 text-[11px] text-amber-400 font-medium bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20 animate-pulse">
-                <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                <span>Auto-saving...</span>
-              </span>
-            ) : autoSaveStatus === 'error' ? (
-              <button
-                type="button"
-                onClick={onForceSave}
-                className="inline-flex items-center gap-1 text-[11px] text-rose-400 font-medium bg-rose-500/10 hover:bg-rose-500/20 px-1.5 py-0.5 rounded border border-rose-500/20 cursor-pointer"
-                title="Save error. Click to retry saving."
-              >
-                <AlertCircle className="w-3 h-3 text-rose-400" />
-                <span>Save failed (Retry)</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onForceSave}
-                className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-medium bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/20 cursor-pointer transition-colors"
-                title="All changes are automatically saved. Click or press Ctrl+S to save now."
-              >
-                <Check className="w-3 h-3 text-emerald-400" />
-                <span>Auto-saved</span>
-              </button>
-            )}
-
             {isReadMode && (
               <>
                 <span aria-hidden="true">·</span>
@@ -386,19 +348,6 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           {/* Action buttons (ONLY rendered in edit mode; zero buttons rendered in read mode) */}
           {!isReadMode && (
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-              {/* Quick Save Button */}
-              {onForceSave && (
-                <button
-                  type="button"
-                  onClick={onForceSave}
-                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-md transition-colors cursor-pointer"
-                  title="Force save document immediately (Ctrl + S)"
-                >
-                  <Save className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Save</span>
-                </button>
-              )}
-
               {!isScriptLocked && (
                 <>
                   <button

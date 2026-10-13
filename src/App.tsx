@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Note, FloatingSubNote, FloatingPadConfig, ParagraphBlock, WordSize, AutoSaveStatus, TableData, TableColumn, TableRow, TableCell } from './types';
+import { Note, FloatingSubNote, FloatingPadConfig, ParagraphBlock, WordSize, TableData, TableColumn, TableRow, TableCell } from './types';
 import { INITIAL_MAIN_NOTES } from './data/defaultNotes';
 import { generateId } from './utils/helpers';
 import { TopNavbar } from './components/TopNavbar';
@@ -38,7 +38,6 @@ import { PasscodeLoginPage } from './components/PasscodeLoginPage';
 const STORAGE_KEY_NOTES = 'iclick4free_main_notes_v2';
 const STORAGE_KEY_CONFIG = 'iclick4free_floating_config_v2';
 const STORAGE_KEY_WORDSIZE = 'iclick4free_word_size_v2';
-const STORAGE_KEY_AUTOSAVE = 'iclick4free_autosave_v2';
 
 function sanitizeTableData(td?: TableData): TableData | undefined {
   if (!td || !Array.isArray(td.columns)) return undefined;
@@ -177,15 +176,6 @@ export default function App() {
     }
   });
 
-  const handleLockApp = () => {
-    try {
-      localStorage.removeItem('iclick4free_passcode_unlocked');
-    } catch {
-      // ignore
-    }
-    setIsPasscodeUnlocked(false);
-  };
-
   // Load initial notes from localStorage or defaults
   const [notes, setNotes] = useState<Note[]>(() => {
     try {
@@ -239,17 +229,6 @@ export default function App() {
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [isReadMode, setIsReadMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // Auto-save state
-  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>('saved');
-  const [isAutoSaveEnabled, setIsAutoSaveEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_AUTOSAVE);
-      return saved !== 'false';
-    } catch {
-      return true;
-    }
-  });
 
   // Reference to hold notes for syncing callbacks without stale closures
   const notesRef = useRef<Note[]>(notes);
@@ -429,15 +408,36 @@ export default function App() {
     ];
   }, [activeNote?.id, activeNote?.floatingNotes, activeNote?.title, activeNote?.updatedAt]);
 
-  // Ref to debounce Firestore and local storage auto-save writes
+  // Ref to debounce Firestore writes
   const saveDebounceMap = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
+  // Reliable flush of all pending in-memory and debounced saves to disk (localStorage) and cloud (Firestore)
+  const flushPendingSaves = useCallback(() => {
+    // 1. Immediately persist full notes array to localStorage
+    try {
+      localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notesRef.current));
+    } catch (e) {
+      console.error('LocalStorage write error:', e);
+    }
+
+    // 2. Immediately execute any pending Firestore debounce writes
+    if (user && saveDebounceMap.current.size > 0) {
+      saveDebounceMap.current.forEach((timer, noteId) => {
+        clearTimeout(timer);
+        const noteToSave = notesRef.current.find((n) => n.id === noteId);
+        if (noteToSave) {
+          saveNoteToFirestore(user.uid, noteToSave).catch((err) =>
+            console.error('Flush to Firestore error:', err)
+          );
+        }
+      });
+      saveDebounceMap.current.clear();
+    }
+  }, [user]);
+
+  // Always-on debounced auto-save (saving is always active and reliable)
   const queueAutoSave = useCallback(
     (updatedNote: Note) => {
-      if (!isAutoSaveEnabled) return;
-
-      setAutoSaveStatus('saving');
-
       const existing = saveDebounceMap.current.get(updatedNote.id);
       if (existing) {
         clearTimeout(existing);
@@ -456,69 +456,25 @@ export default function App() {
               notesRef.current.find((n) => n.id === updatedNote.id) || updatedNote;
             await saveNoteToFirestore(user.uid, freshestNote);
           }
-
-          setAutoSaveStatus('saved');
         } catch (err) {
           console.error('Failed to auto-save note:', err);
-          setAutoSaveStatus('error');
         } finally {
           saveDebounceMap.current.delete(updatedNote.id);
         }
-      }, 450);
+      }, 350);
 
       saveDebounceMap.current.set(updatedNote.id, timer);
     },
-    [isAutoSaveEnabled, user]
+    [user]
   );
-
-  const handleForceSave = useCallback(async () => {
-    const targetNote = notesRef.current.find((n) => n.id === activeNoteId) || activeNote;
-    if (!targetNote) return;
-    setAutoSaveStatus('saving');
-
-    const existing = saveDebounceMap.current.get(targetNote.id);
-    if (existing) {
-      clearTimeout(existing);
-      saveDebounceMap.current.delete(targetNote.id);
-    }
-
-    try {
-      try {
-        localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notesRef.current));
-      } catch {}
-
-      if (user) {
-        await saveNoteToFirestore(user.uid, targetNote);
-      }
-
-      setTimeout(() => {
-        setAutoSaveStatus('saved');
-      }, 150);
-    } catch (err) {
-      console.error('Failed to force save note:', err);
-      setAutoSaveStatus('error');
-    }
-  }, [activeNoteId, activeNote, user]);
 
   // Flush unsaved changes immediately on document switch
   const handleSelectNote = useCallback(
     (id: string) => {
-      if (activeNote && saveDebounceMap.current.has(activeNote.id)) {
-        const timer = saveDebounceMap.current.get(activeNote.id);
-        if (timer) clearTimeout(timer);
-        saveDebounceMap.current.delete(activeNote.id);
-
-        try {
-          localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notesRef.current));
-          if (user) {
-            saveNoteToFirestore(user.uid, activeNote);
-          }
-        } catch {}
-        setAutoSaveStatus('saved');
-      }
+      flushPendingSaves();
       setActiveNoteId(id);
     },
-    [activeNote, user]
+    [flushPendingSaves]
   );
 
   // Global Ctrl + S / Cmd + S listener to trigger instant save
@@ -526,34 +482,37 @@ export default function App() {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault();
-        handleForceSave();
+        flushPendingSaves();
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [handleForceSave]);
+  }, [flushPendingSaves]);
 
-  // Flush save on page visibility hidden or before unload
+  // Flush save on page visibility hidden, blur, pagehide, or beforeunload
   useEffect(() => {
-    const flushSave = () => {
-      try {
-        localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notesRef.current));
-      } catch {}
+    const handleFlush = () => {
+      flushPendingSaves();
     };
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        flushSave();
+        flushPendingSaves();
       }
     };
 
-    window.addEventListener('beforeunload', flushSave);
+    window.addEventListener('beforeunload', handleFlush);
+    window.addEventListener('pagehide', handleFlush);
+    window.addEventListener('blur', handleFlush);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
-      window.removeEventListener('beforeunload', flushSave);
+      window.removeEventListener('beforeunload', handleFlush);
+      window.removeEventListener('pagehide', handleFlush);
+      window.removeEventListener('blur', handleFlush);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [flushPendingSaves]);
 
   // Auth actions
   const handleSignInGoogle = async () => {
@@ -583,13 +542,25 @@ export default function App() {
     await sendPasswordResetEmail(auth, email);
   };
 
+  const handleLockApp = useCallback(() => {
+    flushPendingSaves();
+    try {
+      localStorage.removeItem('iclick4free_passcode_unlocked');
+    } catch {
+      // ignore
+    }
+    setIsPasscodeUnlocked(false);
+  }, [flushPendingSaves]);
+
   const handleSignOut = async () => {
+    flushPendingSaves();
     isExplicitlySignedOut.current = true;
     await signOut(auth);
   };
 
   // Create new document
   const handleCreateNewNote = async () => {
+    flushPendingSaves();
     const newNote: Note = {
       id: generateId('note'),
       title: 'Untitled Document',
@@ -658,6 +629,7 @@ export default function App() {
   );
 
   const handleDeleteNote = async (id: string) => {
+    flushPendingSaves();
     if (notes.length <= 1) return;
     const remaining = notes.filter((n) => n.id !== id);
     setNotes(remaining);
@@ -675,6 +647,7 @@ export default function App() {
   };
 
   const handleDuplicateNote = async (noteToDup: Note) => {
+    flushPendingSaves();
     const duplicated: Note = {
       ...noteToDup,
       id: generateId('note'),
@@ -886,9 +859,6 @@ export default function App() {
         onSignIn={() => setIsAuthModalOpen(true)}
         onSignOut={handleSignOut}
         onLockApp={handleLockApp}
-        autoSaveStatus={autoSaveStatus}
-        isAutoSaveEnabled={isAutoSaveEnabled}
-        onForceSave={handleForceSave}
       />
 
       {/* Main Workspace: Sidebar + Document Workspace */}
@@ -921,9 +891,6 @@ export default function App() {
             onSendToFloatingPad={handleSendParagraphToFloating}
             onSendWholeNoteToFloating={handleSendWholeNoteToFloating}
             onOpenExportModal={() => setShowExportModal(true)}
-            autoSaveStatus={autoSaveStatus}
-            isAutoSaveEnabled={isAutoSaveEnabled}
-            onForceSave={handleForceSave}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-zinc-500">
