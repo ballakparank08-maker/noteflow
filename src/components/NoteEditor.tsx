@@ -12,6 +12,8 @@ import {
   FolderOpen,
   Table as TableIcon,
   Trash2,
+  Save,
+  Loader2,
 } from 'lucide-react';
 
 interface NoteEditorProps {
@@ -26,6 +28,8 @@ interface NoteEditorProps {
   onOpenExportModal: () => void;
   onLoadFile?: (file: File) => void;
   onDeleteNote?: (id: string) => void;
+  saveStatus?: 'saved' | 'unsaved' | 'saving';
+  onManualSave?: () => void;
 }
 
 export const NoteEditor: React.FC<NoteEditorProps> = ({
@@ -39,6 +43,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   onOpenExportModal,
   onLoadFile,
   onDeleteNote,
+  saveStatus = 'saved',
+  onManualSave,
 }) => {
   const [filterMode, setFilterMode] = useState<'all' | 'pending' | 'completed'>('all');
   const [copiedNotification, setCopiedNotification] = useState(false);
@@ -355,6 +361,40 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           {/* Action buttons (ONLY rendered in edit mode; zero buttons rendered in read mode) */}
           {!isReadMode && (
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              {/* Primary Save Button */}
+              {onManualSave && (
+                <button
+                  type="button"
+                  onClick={onManualSave}
+                  disabled={saveStatus === 'saving'}
+                  className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer shadow-xs ${
+                    saveStatus === 'unsaved'
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold shadow-emerald-500/20'
+                      : saveStatus === 'saving'
+                      ? 'bg-zinc-800 text-zinc-400 cursor-wait'
+                      : 'text-zinc-400 hover:text-white hover:bg-zinc-900 border border-zinc-800'
+                  }`}
+                  title="Save document changes (Ctrl+S / Cmd+S)"
+                >
+                  {saveStatus === 'saving' ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                      <span>Saving...</span>
+                    </>
+                  ) : saveStatus === 'unsaved' ? (
+                    <>
+                      <Save className="w-3.5 h-3.5 text-zinc-950 stroke-[2.5]" />
+                      <span>Save</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[2.5]" />
+                      <span>Saved</span>
+                    </>
+                  )}
+                </button>
+              )}
+
               {!isScriptLocked && (
                 <>
                   <button

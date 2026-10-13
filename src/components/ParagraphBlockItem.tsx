@@ -45,7 +45,7 @@ interface ParagraphBlockItemProps {
   onSendToFloatingNote?: (block: ParagraphBlock) => void;
 }
 
-export const ParagraphBlockItem: React.FC<ParagraphBlockItemProps> = ({
+export const ParagraphBlockItemComponent: React.FC<ParagraphBlockItemProps> = ({
   block,
   index,
   totalBlocks,
@@ -74,6 +74,7 @@ export const ParagraphBlockItem: React.FC<ParagraphBlockItemProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showMenu, setShowMenu] = React.useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const hasFocusedRef = useRef(false);
 
   // Auto-resize textarea to fit text content
   const resizeTextarea = () => {
@@ -89,8 +90,10 @@ export const ParagraphBlockItem: React.FC<ParagraphBlockItemProps> = ({
     }
   }, [block.text, block.type, block.isChecklist, isReadMode, wordSize]);
 
+  // Only auto-focus once on initial mount if requested, never during continuous editing
   useEffect(() => {
-    if (!isReadMode && autoFocus && textareaRef.current) {
+    if (!isReadMode && autoFocus && textareaRef.current && !hasFocusedRef.current) {
+      hasFocusedRef.current = true;
       textareaRef.current.focus();
       const len = textareaRef.current.value.length;
       textareaRef.current.setSelectionRange(len, len);
@@ -112,6 +115,13 @@ export const ParagraphBlockItem: React.FC<ParagraphBlockItemProps> = ({
     };
   }, [showMenu]);
 
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const el = e.target;
+    el.style.height = 'auto';
+    el.style.height = `${Math.max(28, el.scrollHeight)}px`;
+    onUpdate(block.id, { text: el.value });
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Cmd/Ctrl + Shift + C: Toggle checklist on this paragraph
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
@@ -131,8 +141,9 @@ export const ParagraphBlockItem: React.FC<ParagraphBlockItemProps> = ({
       return;
     }
 
-    // Enter: split or create next paragraph
+    // Enter: split or create next paragraph (ignore IME composition Enter)
     if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.nativeEvent.isComposing) return;
       e.preventDefault();
       const target = e.currentTarget;
       const cursorIndex = target.selectionStart || 0;
@@ -585,7 +596,7 @@ export const ParagraphBlockItem: React.FC<ParagraphBlockItemProps> = ({
         <textarea
           ref={textareaRef}
           value={block.text}
-          onChange={(e) => onUpdate(block.id, { text: e.target.value })}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder={
             block.isChecklist
@@ -618,3 +629,22 @@ export const ParagraphBlockItem: React.FC<ParagraphBlockItemProps> = ({
     </div>
   );
 };
+
+function areParagraphPropsEqual(prev: ParagraphBlockItemProps, next: ParagraphBlockItemProps) {
+  return (
+    prev.block.id === next.block.id &&
+    prev.block.text === next.block.text &&
+    prev.block.isChecklist === next.block.isChecklist &&
+    prev.block.checked === next.block.checked &&
+    prev.block.type === next.block.type &&
+    prev.block.tableData === next.block.tableData &&
+    prev.index === next.index &&
+    prev.totalBlocks === next.totalBlocks &&
+    prev.isReadMode === next.isReadMode &&
+    prev.wordSize === next.wordSize &&
+    prev.isDragging === next.isDragging &&
+    prev.dropPosition === next.dropPosition
+  );
+}
+
+export const ParagraphBlockItem = React.memo(ParagraphBlockItemComponent, areParagraphPropsEqual);

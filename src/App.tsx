@@ -250,8 +250,12 @@ export default function App() {
     }
   }, [wordSize]);
 
-  // Ref to debounce Firestore writes
-  const saveDebounceMap = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Manual Save status ('saved' | 'unsaved' | 'saving')
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved');
+  const saveStatusRef = useRef<'saved' | 'unsaved' | 'saving'>('saved');
+  useEffect(() => {
+    saveStatusRef.current = saveStatus;
+  }, [saveStatus]);
 
   const handleSignInPasscode = useCallback(async () => {
     isExplicitlySignedOut.current = false;
@@ -305,6 +309,12 @@ export default function App() {
             (remoteNotes) => {
               if (remoteNotes.length === 0) return;
 
+              // If user has unsaved local edits or a save is in flight, DO NOT overwrite with remote notes!
+              // This strictly prevents cursor jumping, reset textareas, and character duplication while writing.
+              if (saveStatusRef.current === 'unsaved' || saveStatusRef.current === 'saving') {
+                return;
+              }
+
               const normalized = remoteNotes.map(ensureNoteFloatingNotes);
 
               setNotes((prevNotes) => {
@@ -319,22 +329,18 @@ export default function App() {
                     hasChanges = true;
                   } else {
                     const local = merged[localIdx];
-                    const isLocallyPending = saveDebounceMap.current.has(remote.id);
                     const isRemoteNewer = (remote.updatedAt || 0) > (local.updatedAt || 0);
 
-                    // Strictly only update if remote is newer and not being actively edited right now!
-                    if (isRemoteNewer && !isLocallyPending) {
+                    if (isRemoteNewer) {
                       merged[localIdx] = remote;
                       hasChanges = true;
                     }
                   }
                 }
 
-                // Remove notes deleted remotely, unless currently being edited
+                // Remove notes deleted remotely
                 const remoteIds = new Set(normalized.map((n) => n.id));
-                const filtered = merged.filter(
-                  (n) => remoteIds.has(n.id) || saveDebounceMap.current.has(n.id)
-                );
+                const filtered = merged.filter((n) => remoteIds.has(n.id));
 
                 if (filtered.length !== merged.length) {
                   hasChanges = true;
@@ -448,86 +454,59 @@ export default function App() {
     ];
   }, [activeNote?.id, activeNote?.floatingNotes, activeNote?.title, activeNote?.updatedAt]);
 
-  // Reliable flush of all pending in-memory and debounced saves to cloud (Firestore)
-  const flushPendingSaves = useCallback(() => {
-    if (user && notesRef.current.length > 0) {
-      saveAllNotesToFirestore(user.uid, notesRef.current).catch((err) =>
-        console.error('Flush to Firestore error:', err)
-      );
-      saveDebounceMap.current.clear();
+  // Manual Save triggered by Save button or Ctrl+S / Cmd+S
+  const handleManualSave = useCallback(async () => {
+    if (!user) {
+      setSaveStatus('saved');
+      saveStatusRef.current = 'saved';
+      return;
+    }
+
+    setSaveStatus('saving');
+    saveStatusRef.current = 'saving';
+    setIsSyncing(true);
+
+    try {
+      await saveAllNotesToFirestore(user.uid, notesRef.current);
+      setSaveStatus('saved');
+      saveStatusRef.current = 'saved';
+    } catch (err) {
+      console.error('Failed to save to Firestore:', err);
+      setSaveStatus('unsaved');
+      saveStatusRef.current = 'unsaved';
+    } finally {
+      setIsSyncing(false);
     }
   }, [user]);
 
-  // Always-on debounced auto-save directly to Firebase Cloud Firestore
-  const queueAutoSave = useCallback(
-    (updatedNote: Note) => {
-      const existing = saveDebounceMap.current.get(updatedNote.id);
-      if (existing) {
-        clearTimeout(existing);
-      }
+  // Document selection switch
+  const handleSelectNote = useCallback((id: string) => {
+    setActiveNoteId(id);
+  }, []);
 
-      const timer = setTimeout(async () => {
-        try {
-          if (user) {
-            await saveAllNotesToFirestore(user.uid, notesRef.current);
-          }
-        } catch (err) {
-          console.error('Failed to auto-save note:', err);
-        } finally {
-          saveDebounceMap.current.delete(updatedNote.id);
-        }
-      }, 350);
-
-      saveDebounceMap.current.set(updatedNote.id, timer);
-    },
-    [user]
-  );
-
-  // Flush unsaved changes immediately on document switch
-  const handleSelectNote = useCallback(
-    (id: string) => {
-      flushPendingSaves();
-      setActiveNoteId(id);
-    },
-    [flushPendingSaves]
-  );
-
-  // Global Ctrl + S / Cmd + S listener to trigger instant save
+  // Global Ctrl + S / Cmd + S listener to trigger manual save
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
         e.preventDefault();
-        flushPendingSaves();
+        handleManualSave();
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [flushPendingSaves]);
+  }, [handleManualSave]);
 
-  // Flush save on page visibility hidden, blur, pagehide, or beforeunload
+  // Warn user before leaving page if there are unsaved changes
   useEffect(() => {
-    const handleFlush = () => {
-      flushPendingSaves();
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        flushPendingSaves();
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (saveStatusRef.current === 'unsaved') {
+        e.preventDefault();
+        e.returnValue = '';
       }
     };
-
-    window.addEventListener('beforeunload', handleFlush);
-    window.addEventListener('pagehide', handleFlush);
-    window.addEventListener('blur', handleFlush);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleFlush);
-      window.removeEventListener('pagehide', handleFlush);
-      window.removeEventListener('blur', handleFlush);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [flushPendingSaves]);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   // Auth actions
   const handleSignInGoogle = async () => {
@@ -558,24 +537,33 @@ export default function App() {
   };
 
   const handleLockApp = useCallback(() => {
-    flushPendingSaves();
+    if (user && saveStatusRef.current === 'unsaved') {
+      saveAllNotesToFirestore(user.uid, notesRef.current).catch((err) =>
+        console.error('Save before lock error:', err)
+      );
+    }
     try {
       localStorage.removeItem('iclick4free_passcode_unlocked');
     } catch {
       // ignore
     }
     setIsPasscodeUnlocked(false);
-  }, [flushPendingSaves]);
+  }, [user]);
 
   const handleSignOut = async () => {
-    flushPendingSaves();
+    if (user && saveStatusRef.current === 'unsaved') {
+      try {
+        await saveAllNotesToFirestore(user.uid, notesRef.current);
+      } catch (err) {
+        console.error('Save before signout error:', err);
+      }
+    }
     isExplicitlySignedOut.current = true;
     await signOut(auth);
   };
 
   // Create new document
   const handleCreateNewNote = async () => {
-    flushPendingSaves();
     const newNote: Note = {
       id: generateId('note'),
       title: 'Untitled Document',
@@ -610,14 +598,27 @@ export default function App() {
 
     const nextNotes = [newNote, ...notesRef.current];
     setNotes(nextNotes);
+    notesRef.current = nextNotes;
     setActiveNoteId(newNote.id);
     setIsReadMode(false);
 
     // Save to Firestore if user is authenticated
     if (user) {
-      saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
-        console.error('Failed to save new note to Firestore:', err)
-      );
+      setSaveStatus('saving');
+      saveStatusRef.current = 'saving';
+      saveAllNotesToFirestore(user.uid, nextNotes)
+        .then(() => {
+          setSaveStatus('saved');
+          saveStatusRef.current = 'saved';
+        })
+        .catch((err) => {
+          console.error('Failed to save new note to Firestore:', err);
+          setSaveStatus('unsaved');
+          saveStatusRef.current = 'unsaved';
+        });
+    } else {
+      setSaveStatus('saved');
+      saveStatusRef.current = 'saved';
     }
   };
 
@@ -625,24 +626,36 @@ export default function App() {
   const handleLoadFile = useCallback(
     async (file: File) => {
       try {
-        flushPendingSaves();
         const loadedNote = await loadFileToNote(file);
         const nextNotes = [loadedNote, ...notesRef.current];
         setNotes(nextNotes);
+        notesRef.current = nextNotes;
         setActiveNoteId(loadedNote.id);
         setIsReadMode(false);
 
         // Immediate write to Firestore if authenticated
         if (user) {
-          saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
-            console.error('Failed to load file to Firestore:', err)
-          );
+          setSaveStatus('saving');
+          saveStatusRef.current = 'saving';
+          saveAllNotesToFirestore(user.uid, nextNotes)
+            .then(() => {
+              setSaveStatus('saved');
+              saveStatusRef.current = 'saved';
+            })
+            .catch((err) => {
+              console.error('Failed to load file to Firestore:', err);
+              setSaveStatus('unsaved');
+              saveStatusRef.current = 'unsaved';
+            });
+        } else {
+          setSaveStatus('saved');
+          saveStatusRef.current = 'saved';
         }
       } catch (err) {
         console.error('Failed to load file:', err);
       }
     },
-    [flushPendingSaves, user]
+    [user]
   );
 
   // Drag and drop state for desktop file loading
@@ -685,10 +698,9 @@ export default function App() {
     }
   };
 
-  // Update active document and save to Firestore (debounced auto-save)
+  // Update active document locally (pure in-memory, ZERO background network write while typing!)
   const handleUpdateActiveNote = useCallback(
     (updates: Partial<Note>) => {
-      let updatedNoteToSave: Note | null = null;
       setNotes((prev) => {
         const idx = prev.findIndex((n) => n.id === activeNoteId);
         if (idx === -1) return prev;
@@ -698,36 +710,45 @@ export default function App() {
           ...updates,
           updatedAt: Date.now(),
         };
-        updatedNoteToSave = updatedNote;
         const nextNotes = [...prev];
         nextNotes[idx] = updatedNote;
         notesRef.current = nextNotes;
         return nextNotes;
       });
 
-      if (updatedNoteToSave) {
-        queueAutoSave(updatedNoteToSave);
-      }
+      setSaveStatus('unsaved');
+      saveStatusRef.current = 'unsaved';
     },
-    [activeNoteId, queueAutoSave]
+    [activeNoteId]
   );
 
   const handleDeleteNote = async (id: string) => {
-    flushPendingSaves();
-    const remaining = notes.filter((n) => n.id !== id);
+    const remaining = notesRef.current.filter((n) => n.id !== id);
     const nextNotes = remaining.length > 0 ? remaining : [createBlankNote()];
     setNotes(nextNotes);
+    notesRef.current = nextNotes;
     setActiveNoteId(nextNotes[0]?.id || '');
 
     if (user) {
-      deleteNoteFromFirestore(user.uid, id, nextNotes).catch((err) =>
-        console.error('Failed to delete note from Firestore:', err)
-      );
+      setSaveStatus('saving');
+      saveStatusRef.current = 'saving';
+      deleteNoteFromFirestore(user.uid, id, nextNotes)
+        .then(() => {
+          setSaveStatus('saved');
+          saveStatusRef.current = 'saved';
+        })
+        .catch((err) => {
+          console.error('Failed to delete note from Firestore:', err);
+          setSaveStatus('unsaved');
+          saveStatusRef.current = 'unsaved';
+        });
+    } else {
+      setSaveStatus('saved');
+      saveStatusRef.current = 'saved';
     }
   };
 
   const handleDuplicateNote = async (noteToDup: Note) => {
-    flushPendingSaves();
     const duplicated: Note = {
       ...noteToDup,
       id: generateId('note'),
@@ -747,12 +768,25 @@ export default function App() {
 
     const nextNotes = [duplicated, ...notesRef.current];
     setNotes(nextNotes);
+    notesRef.current = nextNotes;
     setActiveNoteId(duplicated.id);
 
     if (user) {
-      saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
-        console.error('Failed to save duplicated note to Firestore:', err)
-      );
+      setSaveStatus('saving');
+      saveStatusRef.current = 'saving';
+      saveAllNotesToFirestore(user.uid, nextNotes)
+        .then(() => {
+          setSaveStatus('saved');
+          saveStatusRef.current = 'saved';
+        })
+        .catch((err) => {
+          console.error('Failed to save duplicated note to Firestore:', err);
+          setSaveStatus('unsaved');
+          saveStatusRef.current = 'unsaved';
+        });
+    } else {
+      setSaveStatus('saved');
+      saveStatusRef.current = 'saved';
     }
   };
 
@@ -763,6 +797,7 @@ export default function App() {
     const nextNotes = notes.map((n) => (n.id === id ? updated : n));
 
     setNotes(nextNotes);
+    notesRef.current = nextNotes;
 
     if (user) {
       saveAllNotesToFirestore(user.uid, nextNotes).catch((err) =>
@@ -971,6 +1006,8 @@ export default function App() {
         onWordSizeChange={setWordSize}
         user={user}
         isSyncing={isSyncing}
+        saveStatus={saveStatus}
+        onManualSave={handleManualSave}
         onSignIn={() => setIsAuthModalOpen(true)}
         onSignOut={handleSignOut}
         onLockApp={handleLockApp}
@@ -1027,6 +1064,8 @@ export default function App() {
             onOpenExportModal={() => setShowExportModal(true)}
             onLoadFile={handleLoadFile}
             onDeleteNote={handleDeleteNote}
+            saveStatus={saveStatus}
+            onManualSave={handleManualSave}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-zinc-500">

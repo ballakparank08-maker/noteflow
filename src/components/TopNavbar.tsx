@@ -15,6 +15,8 @@ import {
   MoreHorizontal,
   X,
   FolderOpen,
+  Save,
+  Check,
 } from 'lucide-react';
 import { WordSize } from '../types';
 import type { User } from '../firebase';
@@ -36,6 +38,8 @@ interface TopNavbarProps {
   onWordSizeChange: (size: WordSize) => void;
   user: User | null;
   isSyncing: boolean;
+  saveStatus?: 'saved' | 'unsaved' | 'saving';
+  onManualSave?: () => void;
   onSignIn: () => void;
   onSignOut: () => void;
   onLockApp?: () => void;
@@ -59,6 +63,8 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onWordSizeChange,
   user,
   isSyncing,
+  saveStatus = 'saved',
+  onManualSave,
   onSignIn,
   onSignOut,
   onLockApp,
@@ -157,6 +163,41 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
       {/* Zone 3: Primary actions */}
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+        {/* Manual Save Button */}
+        {onManualSave && (
+          <button
+            type="button"
+            onClick={onManualSave}
+            disabled={saveStatus === 'saving'}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-sm ${
+              saveStatus === 'unsaved'
+                ? 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold shadow-emerald-500/20 shadow'
+                : saveStatus === 'saving'
+                ? 'bg-zinc-800 text-zinc-400 cursor-wait'
+                : 'bg-zinc-900 hover:bg-zinc-850 text-zinc-300 border border-zinc-800 hover:border-zinc-700'
+            }`}
+            title="Save changes to Firebase Cloud (Ctrl+S / Cmd+S)"
+            aria-label="Save document"
+          >
+            {saveStatus === 'saving' ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                <span>Saving...</span>
+              </>
+            ) : saveStatus === 'unsaved' ? (
+              <>
+                <Save className="w-3.5 h-3.5 text-zinc-950 stroke-[2.5]" />
+                <span>Save</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[2.5]" />
+                <span className="text-zinc-300">Saved</span>
+              </>
+            )}
+          </button>
+        )}
+
         {/* Database Cloud Sync / User Profile */}
         {user ? (
           <div
@@ -314,6 +355,39 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
+
+                {/* Save Button in Mobile Menu */}
+                {onManualSave && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onManualSave();
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      saveStatus === 'unsaved'
+                        ? 'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'
+                        : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                    }`}
+                  >
+                    {saveStatus === 'saving' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-zinc-400" />
+                        <span>Saving...</span>
+                      </>
+                    ) : saveStatus === 'unsaved' ? (
+                      <>
+                        <Save className="w-4 h-4 text-zinc-950" />
+                        <span>Save Document</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-400" />
+                        <span>Document Saved</span>
+                      </>
+                    )}
+                  </button>
+                )}
 
                 {/* Word Size in Mobile Popover */}
                 <div>
